@@ -2,13 +2,11 @@ const express = require('express');
 const cors    = require('cors');
 
 const app  = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 
-/* ── Middleware — CORS open voor alle origins ── */
 app.use(cors());
 app.use(express.json());
 
-/* ── System Prompt ── */
 const SYSTEM_PROMPT = `You are NOVA, the AI sales assistant for BELTH, a Belgian AI engineering company based in Zottegem, Belgium.
 
 ## YOUR MISSION
@@ -56,15 +54,13 @@ Then confirm: "Perfect! One of our specialists will contact you within 1-2 busin
 ## CRITICAL RULES
 - NEVER give medical advice
 - NEVER mention competitor products
-- If asked if you're AI: "Yes, I'm NOVA, BELTH's AI assistant."
+- If asked if you are AI: say yes, you are NOVA, BELTH's AI assistant
 - Keep replies short and conversational`;
 
-/* ── Health check ── */
 app.get('/', (req, res) => {
   res.json({ status: 'NOVA backend online', version: '1.0.0' });
 });
 
-/* ── Main chat endpoint ── */
 app.post('/chat', async (req, res) => {
   try {
     const { messages } = req.body;
@@ -72,39 +68,39 @@ app.post('/chat', async (req, res) => {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    const recentMessages = messages.slice(-20);
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         process.env.ANTHROPIC_API_KEY,
+        'content-type':      'application/json',
+        'x-api-key':         apiKey,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
         model:      'claude-sonnet-4-20250514',
         max_tokens: 1000,
         system:     SYSTEM_PROMPT,
-        messages:   recentMessages
+        messages:   messages.slice(-20)
       })
     });
 
     const data = await response.json();
 
     if (data.error) {
-      console.error('Anthropic API error:', data.error);
-      return res.status(500).json({ error: 'AI service error' });
+      console.error('Anthropic error:', JSON.stringify(data.error));
+      return res.status(500).json({ error: 'AI error', detail: data.error.message });
     }
 
-    const reply = data.content?.[0]?.text || 'Geen antwoord ontvangen.';
+    const reply = data.content?.[0]?.text || 'Geen antwoord.';
     res.json({ reply });
 
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Server error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`NOVA backend draait op poort ${PORT}`);
+  console.log(`NOVA backend running on port ${PORT}`);
 });
