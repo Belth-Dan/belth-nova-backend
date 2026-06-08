@@ -114,7 +114,7 @@ async function sendLeadEmail(lead) {
         'Authorization': `Bearer ${process.env.RESEND_API_KEY}`
       },
       body: JSON.stringify({
-        from:    'NOVA <onboarding@resend.dev>',
+        from:    'NOVA <nova@belth.net>',
         to:      ['info@belth.net'],
         subject: `🤖 NOVA Lead: ${name} — ${company || email}`,
         html:    html
