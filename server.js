@@ -47,9 +47,17 @@ Detect the visitor's language automatically and respond in the same language. Su
 ## PRICING
 Always on request. Say: "Pricing depends on your specific needs. Let me collect your details so one of our specialists can prepare a tailored proposal within 1-2 business days."
 
-## LEAD COLLECTION
-When visitor shows interest ask naturally: name, email, company name, main need.
-Then confirm: "Perfect! One of our specialists will contact you within 1-2 business days."
+## LEAD COLLECTION — VERY IMPORTANT
+When a visitor shows clear interest (asks about pricing, says they want something, asks how to start), collect their details naturally one by one:
+1. "Wat is uw naam?" / "What's your name?"
+2. "Wat is uw e-mailadres?" / "What's your email?"
+3. "Bedrijfsnaam?" / "Company name?" (optional)
+4. "Wat is uw belangrijkste behoefte?" / "What's your main need?"
+
+When you have name + email, respond with the confirmation message AND add this exact line at the very end (invisible to user, used by system):
+##LEAD:name=NAAM|email=EMAIL|company=BEDRIJF|need=BEHOEFTE##
+
+Example: ##LEAD:name=Jan Peeters|email=jan@test.be|company=Advocatenkantoor Peeters|need=AI Call System##
 
 ## CRITICAL RULES
 - NEVER give medical advice
@@ -57,10 +65,89 @@ Then confirm: "Perfect! One of our specialists will contact you within 1-2 busin
 - If asked if you are AI: say yes, you are NOVA, BELTH's AI assistant
 - Keep replies short and conversational`;
 
+/* ── Send lead email via Resend ── */
+async function sendLeadEmail(lead) {
+  try {
+    const { name, email, company, need } = lead;
+    const now = new Date().toLocaleString('nl-BE', { timeZone: 'Europe/Brussels' });
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8f9fa;padding:20px;border-radius:12px;">
+        <div style="background:linear-gradient(135deg,#1a2f52,#2d1b69);padding:24px;border-radius:8px;margin-bottom:20px;">
+          <h1 style="color:#63b3ed;margin:0;font-size:22px;">🤖 NOVA — Nieuwe Lead</h1>
+          <p style="color:#a0b8d0;margin:8px 0 0;">belth.net · ${now}</p>
+        </div>
+        <div style="background:white;padding:24px;border-radius:8px;border:1px solid #e2e8f0;">
+          <table style="width:100%;border-collapse:collapse;">
+            <tr style="border-bottom:1px solid #f0f0f0;">
+              <td style="padding:12px 0;color:#7a8ba0;font-size:13px;width:120px;">👤 Naam</td>
+              <td style="padding:12px 0;font-weight:600;color:#1a2f52;">${name}</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f0f0f0;">
+              <td style="padding:12px 0;color:#7a8ba0;font-size:13px;">📧 Email</td>
+              <td style="padding:12px 0;font-weight:600;"><a href="mailto:${email}" style="color:#2563eb;">${email}</a></td>
+            </tr>
+            <tr style="border-bottom:1px solid #f0f0f0;">
+              <td style="padding:12px 0;color:#7a8ba0;font-size:13px;">🏢 Bedrijf</td>
+              <td style="padding:12px 0;color:#1a2f52;">${company || '—'}</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 0;color:#7a8ba0;font-size:13px;">💬 Behoefte</td>
+              <td style="padding:12px 0;color:#1a2f52;">${need || '—'}</td>
+            </tr>
+          </table>
+        </div>
+        <div style="text-align:center;margin-top:20px;">
+          <a href="mailto:${email}?subject=BELTH - Opvolging uw vraag&body=Beste ${name},%0D%0A%0D%0ABedankt voor uw interesse in BELTH.%0D%0A%0D%0A"
+             style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">
+            ✉️ Direct antwoorden
+          </a>
+        </div>
+        <p style="text-align:center;color:#a0b8d0;font-size:11px;margin-top:16px;">NOVA AI Assistent · BELTH · belth.net</p>
+      </div>
+    `;
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`
+      },
+      body: JSON.stringify({
+        from:    'NOVA <onboarding@resend.dev>',
+        to:      ['info@belth.net'],
+        subject: `🤖 NOVA Lead: ${name} — ${company || email}`,
+        html:    html
+      })
+    });
+
+    const result = await response.json();
+    console.log('Email sent:', JSON.stringify(result));
+    return result;
+  } catch (err) {
+    console.error('Email error:', err.message);
+  }
+}
+
+/* ── Extract lead from NOVA reply ── */
+function extractLead(text) {
+  const match = text.match(/##LEAD:([^#]+)##/);
+  if (!match) return null;
+  const parts = match[1].split('|');
+  const lead = {};
+  parts.forEach(p => {
+    const [k, v] = p.split('=');
+    if (k && v) lead[k.trim()] = v.trim();
+  });
+  return lead.name && lead.email ? lead : null;
+}
+
+/* ── Health check ── */
 app.get('/', (req, res) => {
-  res.json({ status: 'NOVA backend online', version: '1.0.0' });
+  res.json({ status: 'NOVA backend online', version: '2.0.0' });
 });
 
+/* ── Main chat endpoint ── */
 app.post('/chat', async (req, res) => {
   try {
     const { messages } = req.body;
@@ -92,7 +179,17 @@ app.post('/chat', async (req, res) => {
       return res.status(500).json({ error: 'AI error', detail: data.error.message });
     }
 
-    const reply = data.content?.[0]?.text || 'Geen antwoord.';
+    let reply = data.content?.[0]?.text || 'Geen antwoord.';
+
+    /* Check for lead and send email */
+    const lead = extractLead(reply);
+    if (lead) {
+      console.log('Lead detected:', JSON.stringify(lead));
+      await sendLeadEmail(lead);
+      /* Remove the ##LEAD:...## tag from visible reply */
+      reply = reply.replace(/##LEAD:[^#]+##/g, '').trim();
+    }
+
     res.json({ reply });
 
   } catch (err) {
@@ -102,5 +199,5 @@ app.post('/chat', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`NOVA backend running on port ${PORT}`);
+  console.log(`NOVA backend v2.0 running on port ${PORT}`);
 });
